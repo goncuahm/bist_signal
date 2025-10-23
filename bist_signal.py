@@ -20,7 +20,7 @@ st.title("📊 Custom Stock Technical & Fundamental Strategy — Backtest & LSTM
 st.subheader("📝 Enter Stock Tickers")
 ticker_input = st.text_area(
     "Enter stock tickers (one per line or comma-separated):",
-    value="BASGZ.IS, AFYON.IS, ENJSA.IS, EREGL.IS, AYEN.IS, PAGYO.IS, YGGYO.IS, TUPRS.IS, KRDMD.IS, SISE.IS",
+    value="BASGZ.IS, AFYON.IS, ENJSA.IS, EREGL.IS, AYEN.IS, PAGYO.IS, YGGYO.IS, TUPRS.IS, KRDMD.IS, SISE.IS, LOGO.IS, NTGAZ.IS",
     height=100
 )
 
