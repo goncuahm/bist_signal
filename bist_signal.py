@@ -266,7 +266,7 @@ TOTAL_CAPITAL = 1000000  # Total capital in Liras
 total_trades = results_df["Number of Trades"].sum()
 
 if total_trades > 0:
-    capital_per_trade = TOTAL_CAPITAL / (total_trades/2)
+    capital_per_trade = 5000 # TOTAL_CAPITAL / (total_trades/2)
 else:
     capital_per_trade = 0
 
