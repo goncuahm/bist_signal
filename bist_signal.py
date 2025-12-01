@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 st.set_page_config(page_title="Custom Stock Technical & Fundamental Strategy with Machine Forecast", layout="wide")
 
 # ------------------------------
-# Title
+# Title   
 # ------------------------------
 st.title("📊 Custom Stock Technical & Fundamental Strategy — Backtest & LSTM Forecast")
 
