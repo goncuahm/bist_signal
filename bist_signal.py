@@ -130,12 +130,15 @@ sell_signals = []
 fundamental_results = []
 all_ratios = []
 
-# Store RSI data for all stocks for the grid plot
+# Store RSI data for RSI grid plot
 rsi_store = {}   # ticker -> {"rsi": Series, "signal": str}
+
+# Store price/MA data for the price grid plot
+price_store = {}  # ticker -> {"close": Series, "ma50": Series, "ma200": Series, "signal": str}
 
 for idx, ticker in enumerate(tickers):
     try:
-        data = yf.download(ticker, period=period, auto_adjust=True, progress=False)
+        data = yf.download(ticker, period="2y", auto_adjust=True, progress=False)
         if data.empty:
             st.warning(f"No data found for {ticker}")
             continue
@@ -147,9 +150,12 @@ for idx, ticker in enumerate(tickers):
         data["RSI"] = compute_rsi(data["Close"], rsi_period)
         data = data.dropna()
 
-        total_return, avg_return, trades, buy_idx, sell_idx = backtest_strategy(data, buy_threshold, sell_threshold, tcost)
-        latest_rsi = float(data["RSI"].iloc[-1])
-        latest_close = float(data["Close"].iloc[-1])
+        # Use only last 1y worth of rows for backtest/RSI
+        data_1y = data.iloc[-252:] if len(data) >= 252 else data
+
+        total_return, avg_return, trades, buy_idx, sell_idx = backtest_strategy(data_1y, buy_threshold, sell_threshold, tcost)
+        latest_rsi = float(data_1y["RSI"].iloc[-1])
+        latest_close = float(data_1y["Close"].iloc[-1])
 
         eps = get_eps(ticker)
 
@@ -165,8 +171,21 @@ for idx, ticker in enumerate(tickers):
         else:
             signal = "HOLD"
 
-        # Store RSI series for grid plot
-        rsi_store[ticker] = {"rsi": data["RSI"].copy(), "signal": signal}
+        # Store RSI series for RSI grid plot (last 252 days)
+        rsi_store[ticker] = {"rsi": data_1y["RSI"].copy(), "signal": signal}
+
+        # Compute MAs over the full (2y) dataset so MA200 has enough history,
+        # then slice last 252 days for display
+        close_full = data["Close"]
+        ma50_full  = close_full.rolling(window=50).mean()
+        ma200_full = close_full.rolling(window=200).mean()
+
+        price_store[ticker] = {
+            "close":  close_full.iloc[-252:],
+            "ma50":   ma50_full.iloc[-252:],
+            "ma200":  ma200_full.iloc[-252:],
+            "signal": signal,
+        }
 
         # Fetch fundamental ratios
         ratios = get_fundamental_ratios(ticker)
@@ -317,7 +336,6 @@ fig, axes = plt.subplots(
 )
 fig.subplots_adjust(hspace=0.55, wspace=0.35)
 
-# Flatten axes array for easy indexing
 axes_flat = axes.flatten() if n_tickers > 1 else [axes]
 
 for i, ticker in enumerate(ticker_list):
@@ -331,15 +349,12 @@ for i, ticker in enumerate(ticker_list):
         spine.set_color("#334155")
     ax.tick_params(colors="#94a3b8", labelsize=6)
 
-    # RSI line — colour by signal
     line_color = SIGNAL_COLORS[sig]
     ax.plot(rsi.values, color=line_color, lw=1.4)
 
-    # Threshold lines
     ax.axhline(35, color="#22c55e", lw=0.9, ls="--", alpha=0.8)
     ax.axhline(65, color="#ef4444", lw=0.9, ls="--", alpha=0.8)
 
-    # Shade overbought / oversold zones
     x_range = np.arange(len(rsi))
     ax.fill_between(x_range, rsi.values, 35,
                     where=(rsi.values < 35),
@@ -348,7 +363,6 @@ for i, ticker in enumerate(ticker_list):
                     where=(rsi.values > 65),
                     color="#ef4444", alpha=0.15)
 
-    # Threshold value labels on right edge
     ax.text(len(rsi) - 1, 35, " 35", color="#22c55e",
             fontsize=5.5, va="center", ha="left")
     ax.text(len(rsi) - 1, 65, " 65", color="#ef4444",
@@ -361,19 +375,119 @@ for i, ticker in enumerate(ticker_list):
     ax.set_xticks([])
     ax.grid(color="#334155", alpha=0.4, lw=0.5)
 
-    # Title: ticker + signal emoji + latest RSI value
     title_color = SIGNAL_COLORS[sig]
     ax.set_title(
         f"{SIGNAL_EMOJI[sig]} {ticker}   RSI={latest_rsi_val:.1f}",
         color=title_color, fontsize=7.5, fontweight="bold", pad=4
     )
 
-# Hide any unused subplots
 for j in range(n_tickers, len(axes_flat)):
     axes_flat[j].set_visible(False)
 
 st.pyplot(fig)
 plt.close(fig)
+
+
+# ================================================================
+# PRICE & MOVING AVERAGES GRID — last 252 days, 3 per row
+# ================================================================
+st.subheader("📈 Close Price & Moving Averages — Last 252 Days")
+st.caption(
+    "⚪ Close Price  ·  🟡 MA50  ·  🔵 MA200  ·  Title colour = current signal"
+)
+
+MA50_COLOR  = "#facc15"   # vivid amber / gold
+MA200_COLOR = "#22d3ee"   # electric cyan
+
+price_ticker_list = list(price_store.keys())
+n_price           = len(price_ticker_list)
+n_price_rows      = math.ceil(n_price / COLS_PER_ROW)
+
+fig2, axes2 = plt.subplots(
+    n_price_rows, COLS_PER_ROW,
+    figsize=(5 * COLS_PER_ROW, 3 * n_price_rows),
+    facecolor="#0f172a"
+)
+fig2.subplots_adjust(hspace=0.55, wspace=0.35)
+
+axes2_flat = axes2.flatten() if n_price > 1 else [axes2]
+
+for i, ticker in enumerate(price_ticker_list):
+    ax    = axes2_flat[i]
+    close = price_store[ticker]["close"]
+    ma50  = price_store[ticker]["ma50"]
+    ma200 = price_store[ticker]["ma200"]
+    sig   = price_store[ticker]["signal"]
+
+    x            = np.arange(len(close))
+    close_vals   = close.values.astype(float)
+    ma50_vals    = ma50.values.astype(float)
+    ma200_vals   = ma200.values.astype(float)
+    valid50      = ~np.isnan(ma50_vals)
+    valid200     = ~np.isnan(ma200_vals)
+
+    # ---- axes styling (deep navy, distinct from RSI grid) ----
+    ax.set_facecolor("#0d1b2a")
+    for spine in ax.spines.values():
+        spine.set_color("#1e3a5f")
+    ax.tick_params(colors="#64748b", labelsize=5.5)
+    ax.grid(color="#1e3a5f", alpha=0.45, lw=0.5)
+
+    # ---- close price: bright white, subtle fill ----
+    ax.plot(x, close_vals, color="#ffffff", lw=1.2, zorder=3, label="Close")
+    ax.fill_between(x, close_vals, np.nanmin(close_vals),
+                    color="#ffffff", alpha=0.04, zorder=2)
+
+    # ---- MA 50: gold ----
+    if valid50.any():
+        ax.plot(x[valid50], ma50_vals[valid50],
+                color=MA50_COLOR, lw=1.4, zorder=4, label="MA50")
+
+    # ---- MA 200: cyan ----
+    if valid200.any():
+        ax.plot(x[valid200], ma200_vals[valid200],
+                color=MA200_COLOR, lw=1.4, zorder=4, label="MA200")
+
+    # ---- y-axis limits ----
+    all_vals = np.concatenate([
+        close_vals,
+        ma50_vals[valid50]  if valid50.any()  else np.array([]),
+        ma200_vals[valid200] if valid200.any() else np.array([])
+    ])
+    ymin, ymax = np.nanmin(all_vals), np.nanmax(all_vals)
+    pad = (ymax - ymin) * 0.08 if ymax != ymin else 1
+    ax.set_ylim(ymin - pad, ymax + pad)
+    ax.set_xlim(0, len(close) - 1)
+    ax.set_xticks([])
+
+    # ---- latest price label ----
+    latest_price = float(close_vals[-1])
+    ax.text(len(close) - 1, latest_price,
+            f" {latest_price:,.1f}",
+            color="#ffffff", fontsize=5, va="center", ha="left", zorder=5)
+
+    # ---- compact legend ----
+    ax.legend(
+        fontsize=5, loc="upper left",
+        facecolor="#0d1b2a", edgecolor="#1e3a5f",
+        labelcolor="#cbd5e1", framealpha=0.85,
+        handlelength=1.4, handletextpad=0.4,
+        borderpad=0.4, labelspacing=0.25
+    )
+
+    # ---- title ----
+    ax.set_title(
+        f"{SIGNAL_EMOJI[sig]} {ticker}   ₺{latest_price:,.1f}",
+        color=SIGNAL_COLORS[sig], fontsize=7.5, fontweight="bold", pad=4
+    )
+
+# Hide unused subplots
+for j in range(n_price, len(axes2_flat)):
+    axes2_flat[j].set_visible(False)
+
+st.pyplot(fig2)
+plt.close(fig2)
+
 
 # ================================================================
 # PART 2: Select Stock for LSTM Forecast
@@ -463,7 +577,6 @@ else:
     st.info("Select a stock above to generate RSI LSTM forecast.")
 
 st.caption("Developed for educational and research purposes — RSI Strategy + LSTM Forecast on Custom Stocks.")
-
 
 
 # import streamlit as st
